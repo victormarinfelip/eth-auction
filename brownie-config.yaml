@@ -1,0 +1,10 @@
+reports:
+  exclude_contracts:
+    - SafeMath
+    - TestNFT
+dependencies:
+  - OpenZeppelin/openzeppelin-contracts@4.6.0
+compiler:
+  solc:
+    remappings:
+      - '@openzeppelin=C:/Users/Potato/.brownie/packages/OpenZeppelin/openzeppelin-contracts@4.6.0'
