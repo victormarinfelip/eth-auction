@@ -1,6 +1,6 @@
 ## Dutch auction in solidity:
-## A tested implementation using Brownie for any EVM-compatible chain.
-### Víctor Marín Felip
+### A tested implementation using Brownie for any EVM-compatible chain.
+#### Víctor Marín Felip
 
 
 ### Operation:
