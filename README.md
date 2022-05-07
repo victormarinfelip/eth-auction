@@ -1,6 +1,6 @@
 ## Dutch auction in solidity:
-## A tested implementation using Brownie for any EVM-compatible chain.
-### Víctor Marín Felip
+### A tested implementation using Brownie for any EVM-compatible chain.
+#### Víctor Marín Felip
 
 
 ### Operation:
@@ -34,7 +34,7 @@ the only thing that can be done with the contract is to selfdestruct it.
 The owner must be do steps 1-4. Anyone can then check the price and buy the NFT. The owner
 can destroy the auction at any time, before, during, and after it (if the asset wasn't sold).
 
-### Code
+### Code:
 
 Under `contracts/` there are two solidity files: `Auction.sol` and `QuickNFT.sol`. The
 first one represent the logic described above. The second one is used to provide a 
