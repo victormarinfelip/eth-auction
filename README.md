@@ -48,3 +48,25 @@ test, other to provide every test with a minted NFT, and another to trick browni
 the Auction contract, which is not otherwise used in testing (the fixture). All tests are in `test_main.py` and
 are divided into three categories. One for the constructor and overall permissions, other for
 the price calculations and the act of buying, and a last one for the selfdestructs and a general test.
+
+### Division of integers:
+
+What do you get if you divide the integers 7199 by 3600? 
+
+In solidity:
+```Solidity
+contract Division {
+    function divide(uint a, uint b) public pure returns(uint) {
+        return a / b;
+    }
+}
+```
+ 
+> `divide(7199, 3600)`
+> 
+> 1
+
+7200 is two times 3600, so this should be very close to 2. Solidity just removes
+decimals when dealing with them. This has to be taken into account. In this project,
+if the auction prices were expected to be a very small number of wei (say less than 1000)
+then this effect would be important enough to justify a redesign so prices get properly rounded.
