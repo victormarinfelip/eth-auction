@@ -66,7 +66,7 @@ contract Division {
 > 
 > 1
 
-7200 is two times 3600, so this should be very close to 2. Solidity just removes
-decimals when dealing with them. This has to be taken into account. In this project,
+7200 is two times 3600, so 7199/3600 should be very close to 2 (actually 1.999...) . Solidity just removes
+decimals when dealing with them, so that 1.999 becomes 1. This has to be taken into account some times. In this project,
 if the auction prices were expected to be a very small number of wei (say less than 1000)
 then this effect would be important enough to justify a redesign so prices get properly rounded.
