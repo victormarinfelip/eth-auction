@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @author Victor Marin Felip
@@ -11,7 +12,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  * @notice An implementation of a Dutch-style reverse Auction. Contract needs to be NFT approved to work.
  *
  */
-contract DutchAuction is Ownable {
+contract DutchAuction is Ownable, Pausable {
 
     using SafeMath for uint;
 
@@ -71,7 +72,7 @@ contract DutchAuction is Ownable {
     /**
      * @dev Starts the auction. The contract needs to be approved first at the NFT.
      */
-    function startAuction() public onlyOwner contractIsApproved {
+    function startAuction() public whenNotPaused onlyOwner contractIsApproved {
         require(auctionGreenlit == false, "Can't start an already started auction");
         startAt = block.timestamp;
         auctionGreenlit = true;
@@ -80,15 +81,31 @@ contract DutchAuction is Ownable {
     /**
      * @dev returns the current price based on block.timestamp and the constructor parameters.
      */
-    function getPrice() public view auctionIsLive returns (uint) {
-        // rate = (delta_Y) / (delta_X) -slope of a line- -always negative in our case-
-        // we'll use the negative of delta_Y to get a positive rate so we don't stop using uint
-        uint rate_pos = (startingPrice - reservePrice) / duration;
-        // price = rate * elapsed_time + initial_price, but we have a positive rate
-        // price - initial_price = rate * elapsed_time ->
-        // initial_price - price = -1 * rate * elapsed_time, and we have basically -1 * rate so ->
-        uint price_change_pos = rate_pos * (block.timestamp - startAt);
-        uint price = startingPrice - price_change_pos;
+    function getPrice() public view whenNotPaused auctionIsLive returns (uint) {
+        // New version:
+        // S = starting price
+        // R = reserve price
+        // D = duration
+        // st = start time
+        // N = current time
+        // P = current price
+        //
+        // So:
+        //
+        // rate = (R - S) / D
+        //
+        // P = rate * (N - st) + S
+        //  = S + ( (R - S) * (N - st) ) / D
+        //  = ((S * D) + (R - S) * (N - st)) / D
+        //
+        // And this way we can put the division at the end.
+        // We also want to keep using uints. The only negative calculation of above's expression is (R - S)
+        // If we reverse it to avoid a negative number we can get the same result by:
+        //
+        // ((S * D) - (S - R) * (N - st)) / D
+        //          ^
+        // Where each term and operation should yield a positive number for all valid auction values.
+        uint price = ((startingPrice * duration) - (startingPrice - reservePrice) * (block.timestamp - startAt)) / duration;
         return price;
     }
 
@@ -97,7 +114,7 @@ contract DutchAuction is Ownable {
      * Any extra ETH sent will be returned to the sender. The contract selfdestructs after the process. If not enough ETH
      * is sent to buy it at the current price it reverts and nothing happens. Auction needs to be live to work (started and not finished)
      */
-    function buy() external payable auctionIsLive {
+    function buy() external payable whenNotPaused auctionIsLive {
         uint price = getPrice();
         require(msg.value >= price, "Not enough ETH sent for purchase");
         // Sending the NFT to the buyer
@@ -107,21 +124,21 @@ contract DutchAuction is Ownable {
         if (slack > 0) {
             payable(msg.sender).transfer(slack);
         }
-        // And we render this unusable
-        selfdestruct(seller);
-    }
-
-    /**
-     * @dev Triggers selfdestruct. Only owner can call this function.
-     */
-    function destroyAuction() public onlyOwner {
-        selfdestruct(seller);
+        // And we pause the contract using Paused
+        _pause();
     }
 
     /**
      * @dev Returns seconds since auction started.
      */
-    function auctionAge() public view auctionIsLive returns(uint) {
+    function auctionAge() public view whenNotPaused auctionIsLive returns(uint) {
         return block.timestamp - startAt;
+    }
+
+    /**
+     * @dev Sends contract balance to target address. The contract needs to be paused.
+     */
+    function recoverEth(address payable target) external payable onlyOwner whenPaused {
+        target.transfer(address(this).balance);
     }
 }
