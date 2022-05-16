@@ -3,12 +3,11 @@
 from brownie import DutchAuction, TestNFT
 from scripts.definitions import NFTType, AuctionType
 from brownie.test import given, strategy
-from hypothesis import settings
-import pytest
 from brownie import chain
 import brownie
 import time
 from typing import Optional
+import math
 
 # ==================================================================
 #
@@ -185,7 +184,8 @@ def test_auction_age_only_live(nft: NFTType, accounts, auction):
         auction.auctionAge()
     auction.startAuction({"from": accounts[0]})
     pass_time(time=20)
-    assert auction.auctionAge() == 20
+    # Can't get a hang on how to pass some exact amount of time on the chain yet...
+    assert auction.auctionAge() in [20, 19, 21]
     pass_time(time=600)  # Auction has ended now
     with brownie.reverts(NOT_LIVE_END):
         auction.auctionAge()
@@ -197,20 +197,34 @@ def test_auction_age_only_live(nft: NFTType, accounts, auction):
 #
 # ==================================================================
 
-# I realize than the following two tests could be a prime example for hypothesis testing, but
-# I can't get it to work with brownie. In real life I'd ask for help of course.
-def test_get_price(nft, accounts):
-    price_i = 5000
-    price_f = 2000
-    duration = 100
-    elapsed = 50
 
-    # Price should be: Price = Slope * delta_time + initial_price
-    # Slope is delta_price / delta_time
-    slope = int((price_f - price_i) / duration)
-    price = lambda t: round(slope * t + price_i)
+@given(
+    duration=strategy("uint", max_value=10*365*86400), # Max = 10 years
+    initial=strategy("uint", max_value=1000000000000000000000000),  # 1M ETH
+    reserve=strategy("uint", max_value=1000000000000000000000000),
+    elapsed=strategy("uint", min_value=10, max_value=10*365*86400)
+)
+def test_get_price(TestNFT, accounts, elapsed, reserve, initial, duration):
 
-    auction: AuctionType = DutchAuction.deploy(price_i, price_f, duration, nft, 123, {"from": accounts[0]})
+    # We're already testing for these in another test, so let's speed up the hypothesis testing and only deal with
+    # Valid parameters
+    if elapsed >= duration:
+        return
+    if duration < 60:
+        return
+    if reserve >= initial:
+        return
+    if initial == 0:
+        return
+
+    # We floor the result so it simulates solidity's decimal truncation
+    # ALSO: use // for a true integer division
+    price = lambda t: math.floor(((initial * duration) - (initial - reserve) * t) // duration)
+
+    # We want a new NFT each round of hypothesis complains
+    nft: NFTType = TestNFT.deploy({'from': accounts[0]})
+    nft.mint(accounts[0], 123, "abc", {'from': accounts[0]})
+    auction: AuctionType = DutchAuction.deploy(initial, reserve, duration, nft, 123, {"from": accounts[0]})
     tx = nft.approve(str(auction), 123, {"from": accounts[0]})
     tx.wait(1)
 
@@ -222,7 +236,7 @@ def test_get_price(nft, accounts):
     elapsed_chain = auction.auctionAge()
     expected = price(elapsed_chain)
     # We finally make the contract call
-    print("\nData:", price_i, price_f, duration, elapsed, elapsed_chain)
+    print("\nData:", initial, reserve, duration, elapsed, elapsed_chain)
     assert expected == real
     time.sleep(1)  # So RCP is kept alive enough for transactions to finish...
 
@@ -236,8 +250,7 @@ def test_buy(accounts, nft):
     slack = 500  # Fraction of price to be sent when buying
     # Price should be: Price = Slope * delta_time + initial_price
     # Slope is delta_price / delta_time
-    slope = int((price_f - price_i) / duration)
-    price = lambda t: int(slope * t + price_i)
+    price = lambda t: math.floor(((price_i * duration) - (price_i - price_f) * t) // duration)
 
     auction: AuctionType = DutchAuction.deploy(price_i, price_f, duration, nft, 123, {"from": accounts[0]})
     tx = nft.approve(str(auction), 123, {"from": accounts[0]})
@@ -312,75 +325,24 @@ def test_buy_fails_not_enough_eth(nft: NFTType, accounts, auction):
     assert not (accounts[1] == nft.ownerOf(123))
 
 
-# ==================================================================
-#
-# SELFDESTRUCT TESTING
-#
-# ==================================================================
+# # ==================================================================
+# #
+# # SELFDESTRUCT TESTING
+# #
+# # ==================================================================
 
 
-def check_selfdestructed(TxnReceipt):
-    trace = TxnReceipt.trace
-    # We're looking for a 'SELFDESTRUCT' opcode in the last element of the trace
-    return trace[-1].get('op', "") == "SELFDESTRUCT"
+def check_paused(auction) -> bool:
+    return auction.paused()
 
 
-def test_buy_selfdestructs(nft: NFTType, accounts, auction):
+def test_buy_pauses(nft: NFTType, accounts, auction):
     auction: AuctionType = DutchAuction.deploy(5000, 3000, 500, nft, 123, {"from": accounts[0]})
     nft.approve(str(auction), 123, {"from": accounts[0]})
     auction.startAuction({"from": accounts[0]})
     receipt = auction.buy({"from": accounts[1], 'amount': 999999})
     # Now auction should be destroyed with default values:
-    assert check_selfdestructed(receipt)
-
-
-def test_destroy_auction_onlyowner(nft: NFTType, accounts, auction):
-    auction: AuctionType = DutchAuction.deploy(5000, 3000, 500, nft, 123, {"from": accounts[0]})
-    nft.approve(str(auction), 123, {"from": accounts[0]})
-    with brownie.reverts(ONLY_OWNER):
-        auction.destroyAuction({"from": accounts[1]})
-    auction.startAuction({"from": accounts[0]})
-    with brownie.reverts(ONLY_OWNER):
-        auction.destroyAuction({"from": accounts[1]})
-
-
-def test_destroy_auction_selfdestructs(nft: NFTType, accounts, auction):
-    # We're checking this before approval, after approval, when live, and after duration
-    # Not approved:
-    auction: AuctionType = DutchAuction.deploy(5000, 3000, 500, nft, 123, {"from": accounts[0]})
-    pass_time()
-    receipt = auction.destroyAuction({"from": accounts[0]})
-    assert check_selfdestructed(receipt)
-    pass_time()
-
-    # Approved:
-    auction: AuctionType = DutchAuction.deploy(5000, 3000, 500, nft, 123, {"from": accounts[0]})
-    nft.approve(str(auction), 123, {"from": accounts[0]})
-    pass_time()
-    receipt = auction.destroyAuction({"from": accounts[0]})
-    assert check_selfdestructed(receipt)
-    pass_time()
-
-    # Started:
-    auction: AuctionType = DutchAuction.deploy(5000, 3000, 500, nft, 123, {"from": accounts[0]})
-    nft.approve(str(auction), 123, {"from": accounts[0]})
-    pass_time()
-    auction.startAuction({"from": accounts[0]})
-    pass_time()
-    receipt = auction.destroyAuction({"from": accounts[0]})
-    assert check_selfdestructed(receipt)
-    pass_time()
-
-    # Ended
-    auction: AuctionType = DutchAuction.deploy(5000, 3000, 500, nft, 123, {"from": accounts[0]})
-    nft.approve(str(auction), 123, {"from": accounts[0]})
-    pass_time()
-    auction.startAuction({"from": accounts[0]})
-    pass_time(time=600)  # So the auction has ended
-    receipt = auction.destroyAuction({"from": accounts[0]})
-    assert check_selfdestructed(receipt)
-
-    # So we're sure that we can kill the auction and get the sent ETH at any time!
+    assert check_paused(auction)
 
 
 def test_whole_process_buying(nft: NFTType, accounts, auction):
@@ -422,7 +384,7 @@ def test_whole_process_buying(nft: NFTType, accounts, auction):
     assert isinstance(price, int)
     # Finally someone is going to properly buy it:
     receipt = auction.buy({"from": accounts[1], "amount": 999999})
-    assert check_selfdestructed(receipt)
+    assert check_paused(auction)
     pass_time()
     # Now we verify that the NFT changed hands
     assert str(accounts[1]) == nft.ownerOf(123)

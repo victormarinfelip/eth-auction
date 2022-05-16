@@ -90,13 +90,13 @@ class AuctionType(ABC):
         pass
 
     @abstractmethod
-    def destroyAuction(self, caller: Dict):
-        pass
-
-    @abstractmethod
     def auctionAge(self):
         pass
 
     @abstractmethod
     def wait(self, value: int):
+        pass
+
+    @abstractmethod
+    def paused(self) -> bool:
         pass
